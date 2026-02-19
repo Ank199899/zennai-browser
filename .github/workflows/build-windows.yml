@@ -19,6 +19,8 @@ jobs:
     env:
       CHROMIUM_SRC: C:\zennai-build\src
       DEPOT_TOOLS: C:\depot_tools
+      DEPOT_TOOLS_WIN_TOOLCHAIN: 0
+      GYP_MSVS_VERSION: 2022
 
     steps:
       - name: Checkout Zennai repo
@@ -37,14 +39,19 @@ jobs:
 
       - name: Chromium source sync (first time or update)
         shell: cmd
+        env:
+          DEPOT_TOOLS_WIN_TOOLCHAIN: 0
+          GCLIENT_SUPPRESS_GIT_VERSION_WARNING: 1
         run: |
           if not exist "%CHROMIUM_SRC%" (
             mkdir C:\zennai-build
             cd /d C:\zennai-build
             echo solutions = [{ "name": "src", "url": "https://chromium.googlesource.com/chromium/src.git", "managed": False, "custom_deps": {}, "custom_vars": {}, }] > .gclient
+            set DEPOT_TOOLS_WIN_TOOLCHAIN=0
             call gclient sync --no-history --shallow
           ) else (
             cd /d C:\zennai-build
+            set DEPOT_TOOLS_WIN_TOOLCHAIN=0
             call gclient sync
           )
 
@@ -77,6 +84,7 @@ jobs:
       - name: Configure build (gn gen)
         shell: cmd
         run: |
+          set DEPOT_TOOLS_WIN_TOOLCHAIN=0
           set OUT_DIR=%CHROMIUM_SRC%\out\Zennai
           if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
           copy /Y "%GITHUB_WORKSPACE%\args\windows-release.gn" "%OUT_DIR%\args.gn"
