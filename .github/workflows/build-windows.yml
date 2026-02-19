@@ -1,0 +1,131 @@
+name: Build Zennai Browser (Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-windows:
+    runs-on: [self-hosted, Windows, x64]
+    timeout-minutes: 480  # 8 hours max
+
+    env:
+      CHROMIUM_SRC: C:\zennai-build\src
+      DEPOT_TOOLS: C:\depot_tools
+
+    steps:
+      - name: Checkout Zennai repo
+        uses: actions/checkout@v4
+
+      - name: Setup depot_tools PATH
+        shell: powershell
+        run: |
+          $depotTools = $env:DEPOT_TOOLS
+          if (-not (Test-Path $depotTools)) {
+            Write-Host "Cloning depot_tools..."
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git $depotTools
+          }
+          $currentPath = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
+          if (-not $currentPath.Contains($depotTools)) {
+            [System.Environment]::SetEnvironmentVariable("PATH", "$depotTools;$currentPath", "Machine")
+          }
+          echo "$depotTools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "depot_tools ready at $depotTools"
+
+      - name: Chromium source sync (first time or update)
+        shell: cmd
+        run: |
+          if not exist "%CHROMIUM_SRC%" (
+            mkdir C:\zennai-build
+            cd /d C:\zennai-build
+            echo solutions = [{ "name": "src", "url": "https://chromium.googlesource.com/chromium/src.git", "managed": False, "custom_deps": {}, "custom_vars": {}, }] > .gclient
+            call gclient sync --no-history --shallow
+          ) else (
+            cd /d C:\zennai-build
+            call gclient sync
+          )
+
+      - name: Apply Zennai branding
+        shell: powershell
+        run: |
+          $src = $env:CHROMIUM_SRC
+          $repo = $env:GITHUB_WORKSPACE
+
+          Write-Host "Applying branding to $src..."
+
+          # BRANDING file
+          Copy-Item "$repo\branding\BRANDING" "$src\chrome\app\theme\chromium\BRANDING" -Force
+
+          # SVG logo
+          Copy-Item "$repo\branding\product_logo.svg" "$src\chrome\app\theme\chromium\product_logo.svg" -Force
+
+          # Windows icons
+          Get-ChildItem "$repo\branding\win\*.ico" | ForEach-Object {
+            Copy-Item $_.FullName "$src\chrome\app\theme\chromium\win\" -Force
+          }
+          Copy-Item "$repo\branding\win\tiles\*" "$src\chrome\app\theme\chromium\win\tiles\" -Force
+
+          # String resources
+          Copy-Item "$repo\strings\chromium_strings.grd" "$src\chrome\app\chromium_strings.grd" -Force
+          Copy-Item "$repo\strings\settings_chromium_strings.grdp" "$src\chrome\app\settings_chromium_strings.grdp" -Force
+
+          Write-Host "Branding applied successfully"
+
+      - name: Configure build (gn gen)
+        shell: cmd
+        run: |
+          set OUT_DIR=%CHROMIUM_SRC%\out\Zennai
+          if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
+          copy /Y "%GITHUB_WORKSPACE%\args\windows-release.gn" "%OUT_DIR%\args.gn"
+          cd /d %CHROMIUM_SRC%
+          call gn gen out\Zennai
+          echo GN gen completed
+
+      - name: Build mini_installer (chrome.exe + installer)
+        shell: cmd
+        run: |
+          cd /d %CHROMIUM_SRC%
+          call autoninja -C out\Zennai mini_installer
+          echo Build completed
+          dir out\Zennai\mini_installer.exe
+
+      - name: Rename installer
+        shell: powershell
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { '${{ github.event.inputs.version }}' }
+          $src = "C:\zennai-build\src\out\Zennai\mini_installer.exe"
+          $dst = "C:\zennai-build\src\out\Zennai\ZennaiSetup-$version-win64.exe"
+          Copy-Item $src $dst -Force
+          echo "INSTALLER_PATH=$dst" >> $env:GITHUB_ENV
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host "Installer ready: $dst"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Zennai Browser ${{ env.VERSION }}
+          body: |
+            ## Zennai Browser ${{ env.VERSION }}
+
+            Professional Chromium-based browser.
+
+            ### Installation
+            1. Download `ZennaiSetup-${{ env.VERSION }}-win64.exe`
+            2. Run as Administrator
+            3. Launch **Zennai Browser** from Start Menu
+
+            ### System Requirements
+            - Windows 10/11 (64-bit)
+          files: ${{ env.INSTALLER_PATH }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

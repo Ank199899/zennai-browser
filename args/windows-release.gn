@@ -1,0 +1,19 @@
+# Zennai Browser - Windows Release Build
+is_debug = false
+is_component_build = false
+is_official_build = false
+symbol_level = 0
+blink_symbol_level = 0
+chrome_pgo_phase = 0
+
+# Windows target
+target_os = "win"
+target_cpu = "x64"
+
+# Chrome-like features
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"
+enable_widevine = true
+safe_browsing_mode = 1
+enable_pdf = true
+enable_print_preview = true
